@@ -1,7 +1,6 @@
 # NOTE FOR RENDER:
 # First build takes 8-12 minutes due to torch download.
 # Render caches pip packages after first build — subsequent deploys: 2-3 min.
-# If build times out: go to Render Dashboard → Settings → increase build timeout.
 # If OOM errors at runtime: change WHISPER_MODEL=tiny in Environment tab.
 
 # Web framework
@@ -29,11 +28,12 @@ python-dotenv==1.0.1
 # AI — Gemini
 google-generativeai==0.5.4
 
-# Speech-to-text — Whisper (local)
-openai-whisper==20231117
+# Speech-to-text — Whisper (install from GitHub, not PyPI)
+# The PyPI version 20231117 uses an old setup.py that breaks on Render.
+# Installing from GitHub uses the modern build system and avoids this.
+git+https://github.com/openai/whisper.git
 torch==2.2.2
 torchaudio==2.2.2
-setuptools>=65.0.0
 
 # File upload handling
 python-multipart==0.0.9

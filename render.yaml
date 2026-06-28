@@ -2,7 +2,7 @@ services:
   - type: web
     name: roadsos-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade setuptools && pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /api/v1/health
     plan: free
