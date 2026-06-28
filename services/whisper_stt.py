@@ -1,3 +1,5 @@
+import os
+import psutil
 import asyncio
 import time
 from typing import Optional
@@ -22,74 +24,43 @@ WHISPER_LANG_MAP = {
 MAX_AUDIO_DURATION_SECONDS = 300  # 5 minutes
 
 
-def load_whisper_model():
-    """
-    Load Whisper model synchronously. Called once at startup.
-    Uses settings.WHISPER_MODEL (default: "base").
-
-    Available models (tradeoff speed vs accuracy):
-      tiny   (~75MB)  — fastest, less accurate
-      base   (~145MB) — RECOMMENDED for this project
-      small  (~244MB) — more accurate but slower
-      medium (~769MB) — too slow for real-time use
-
-    On first run this downloads the model weights to ~/.cache/whisper/
-    Subsequent runs use the cached weights instantly.
-    """
-    global _whisper_model, _model_loading
-
-    if _whisper_model is not None:
-        return _whisper_model
-
-    if _model_loading:
-        logger.warning("Whisper model is already loading, waiting...")
-        return None
-
+def _get_available_ram_mb() -> int:
+    """Return available system RAM in MB."""
     try:
-        _model_loading = True
-        import whisper
-        import ssl
-        
-        # macOS python SSL workaround
-        try:
-            _create_unverified_https_context = ssl._create_unverified_context
-        except AttributeError:
-            pass
-        else:
-            ssl._create_default_https_context = _create_unverified_https_context
-
-        model_name = settings.WHISPER_MODEL  # "base"
-        logger.info(
-            f"Loading Whisper '{model_name}' model... "
-            f"(first run may take 1-2 minutes to download)"
-        )
-        start = time.time()
-        _whisper_model = whisper.load_model(model_name)
-        elapsed = time.time() - start
-        logger.info(
-            f"Whisper '{model_name}' model loaded in {elapsed:.1f}s ✓"
-        )
-        return _whisper_model
-
-    except ImportError:
-        logger.error(
-            "openai-whisper not installed. "
-            "Run: pip install openai-whisper"
-        )
-        return None
-    except Exception as e:
-        logger.error(f"Failed to load Whisper model: {e}")
-        return None
-    finally:
-        _model_loading = False
-
+        return psutil.virtual_memory().available // (1024 * 1024)
+    except Exception:
+        return 999  # assume enough if psutil fails
 
 def get_whisper_model():
-    """Return the loaded model singleton. Loads if not yet loaded."""
+    """
+    Lazy-load Whisper model only when actually needed.
+    Returns None if not enough RAM is available.
+    """
     global _whisper_model
-    if _whisper_model is None:
-        _whisper_model = load_whisper_model()
-    return _whisper_model
+    
+    if _whisper_model is not None:
+        return _whisper_model
+    
+    available_mb = _get_available_ram_mb()
+    required_mb = 200  # minimum safe threshold
+    
+    if available_mb < required_mb:
+        logger.warning(
+            f"⚠️  Insufficient RAM for Whisper: {available_mb}MB available, "
+            f"{required_mb}MB required. Voice input unavailable."
+        )
+        return None
+    
+    try:
+        import whisper
+        from config import settings
+        logger.info(f"⏳ Loading Whisper model '{settings.WHISPER_MODEL}' on demand...")
+        _whisper_model = whisper.load_model(settings.WHISPER_MODEL)
+        logger.info(f"✅ Whisper model loaded successfully")
+        return _whisper_model
+    except Exception as e:
+        logger.error(f"❌ Failed to load Whisper model: {e}")
+        return None
 
 
 def transcribe_audio_sync(
@@ -191,6 +162,15 @@ async def transcribe_audio(
     This is the function called by the endpoint — always use this,
     never call transcribe_audio_sync() directly from async code.
     """
+    model = get_whisper_model()
+    
+    if model is None:
+        return {
+            "success": False,
+            "error": "Voice input temporarily unavailable (insufficient server memory). Please type your message instead.",
+            "transcription": None
+        }
+
     return await asyncio.to_thread(
         transcribe_audio_sync,
         audio_path,

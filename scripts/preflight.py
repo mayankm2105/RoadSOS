@@ -90,32 +90,17 @@ async def run_preflight_checks() -> dict:
         else:
             logger.warning(f"⚠️  {key}: NOT SET — dependent features will fail")
 
-    # ── Check 3: Whisper model pre-load ─────────────────────────────────
-    # Pre-loading Whisper at startup means the first /chat/voice request
-    # responds in ~2 sec instead of 30 sec. Worth the startup time.
+    # ── Check 3: Whisper model — lazy load only, don't preload at startup ────
+    # On low-memory environments (Render free tier, 512MB), importing torch
+    # at startup causes OOM. Whisper is loaded on first actual /chat/voice
+    # request instead. This trades cold-start latency for server stability.
     try:
-        import whisper
-        logger.info(
-            f"⏳ Loading Whisper model '{settings.WHISPER_MODEL}'... "
-            f"(this takes 5–30 seconds)"
-        )
-        # Store on a module-level variable so services/whisper_stt.py
-        # can access it without re-loading. Use a shared import object.
-        import services.whisper_stt as whisper_service
-        if whisper_service._whisper_model is None:
-            whisper_service._whisper_model = whisper.load_model(
-                settings.WHISPER_MODEL
-            )
-        results["whisper"] = f"ok (model={settings.WHISPER_MODEL})"
-        logger.info(
-            f"✅ Whisper model '{settings.WHISPER_MODEL}' loaded into memory"
-        )
+        import whisper  # just check it's installed, don't load model
+        results["whisper"] = f"ok (model={settings.WHISPER_MODEL}, lazy-load enabled)"
+        logger.info(f"✅ Whisper package available — model will load on first voice request")
     except ImportError:
         results["whisper"] = "not_loaded (whisper not installed)"
         logger.warning("⚠️  whisper package not installed — voice input disabled")
-    except Exception as e:
-        results["whisper"] = f"error: {str(e)}"
-        logger.error(f"❌ Whisper model load failed: {e}")
 
     # ── Check 4: Gemini API ping ─────────────────────────────────────────
     if settings.GEMINI_API_KEY:
